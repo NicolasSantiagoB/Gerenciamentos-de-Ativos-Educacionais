@@ -1,1 +1,0 @@
-# Gerenciamentos-de-Ativos-Educacionais
