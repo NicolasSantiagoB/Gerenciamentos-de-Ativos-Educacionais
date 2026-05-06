@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InventorySync Schools - Diretoria de Ensino</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideInRight { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+        .animate-fadeIn { animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        .toast-enter { animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Loading Overlay */
+        #loadingOverlay { transition: opacity 0.3s ease; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen overflow-hidden flex flex-col selection:bg-blue-200">
+
+    <!-- OVERLAY DE CARREGAMENTO FIREBASE -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-slate-900 z-[200] flex flex-col items-center justify-center text-white">
+        <i class="bi bi-hdd-network-fill text-6xl text-blue-500 mb-4 animate-pulse"></i>
+        <h2 class="text-2xl font-black tracking-widest uppercase">Inventory<span class="text-blue-500">Sync</span></h2>
+        <p class="text-sm text-slate-400 font-bold mt-2 flex items-center gap-2">
+            <i class="bi bi-cloud-arrow-down-fill"></i> Conectando ao Google Cloud...
+        </p>
+    </div>
+
+    <!-- NAVBAR SUPERIOR -->
+    <nav class="bg-slate-900 text-white shadow-xl px-6 py-3 flex justify-between items-center z-50 shrink-0 border-b border-slate-800">
+        <div class="flex items-center gap-4">
+            <div class="bg-gradient-to-br from-blue-500 to-blue-700 p-2.5 rounded-xl shadow-inner">
+                <i class="bi bi-hdd-network-fill text-xl text-white"></i>
+            </div>
+            <div>
+                <span class="text-xl font-black tracking-tight uppercase block leading-none">Inventory<span class="text-blue-400">Sync</span></span>
+                <span class="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Gestão de Ativos Educacionais</span>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="hidden md:flex items-center gap-2 mr-2 px-3 py-1.5 bg-slate-800 rounded-lg text-xs font-bold text-slate-300 border border-slate-700">
+                <i class="bi bi-cloud-check-fill text-emerald-500"></i> Firebase Online
+            </div>
+            <select id="viewSelector" onchange="window.switchView(this.value)" class="bg-white text-slate-900 text-sm rounded-xl px-4 py-2.5 focus:ring-4 focus:ring-blue-500/30 cursor-pointer outline-none font-bold shadow-lg transition-all hover:bg-slate-100">
+                <option value="admin">📊 Visão: Administração</option>
+                <option value="tech">🔧 Visão: Técnico de Campo</option>
+                <option value="school">🏫 Visão: Direção Escolar</option>
+            </select>
+        </div>
+    </nav>
+
+    <!-- ÁREA DE CONTEÚDO PRINCIPAL -->
+    <div class="flex flex-1 overflow-hidden">
+        <aside class="w-72 bg-white border-r border-slate-200 hidden md:flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-40">
+            <div class="p-6 flex-1 space-y-4 overflow-y-auto" id="sidebarMenu"></div>
+            <div class="p-6 border-t border-slate-100 bg-slate-50">
+                <p class="text-[10px] font-black text-slate-400 uppercase text-center flex items-center justify-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Sincronizado
+                </p>
+            </div>
+        </aside>
+
+        <main class="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-50 relative scroll-smooth" id="mainContent"></main>
+    </div>
+
+    <!-- CONTAINER DE NOTIFICAÇÕES -->
+    <div id="toastContainer" class="fixed bottom-6 right-6 z-50 flex flex-col gap-3 pointer-events-none"></div>
+
+    <!-- MODAL DE EXCLUSÃO -->
+    <div id="deleteModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4 transform scale-95 transition-transform duration-300" id="deleteModalContent">
+            <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-3xl mb-6 mx-auto">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <h3 class="text-2xl font-black text-center text-slate-800 mb-2">Confirmar Exclusão?</h3>
+            <p class="text-center text-slate-500 font-medium mb-8">Esta ação removerá o equipamento <strong id="deletePatrimonyDisplay" class="text-slate-800"></strong> permanentemente da nuvem.</p>
+            <div class="flex gap-4">
+                <button onclick="window.closeDeleteModal()" class="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors">Cancelar</button>
+                <button id="confirmDeleteBtn" class="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-600/30 transition-colors flex justify-center items-center gap-2">
+                    Sim, Excluir
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIREBASE SDK & LÓGICA DO APLICATIVO -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp } 
+        from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+        // CONFIGURAÇÃO EXTRAÍDA DO SEU PROJETO FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyAP3r_43qbk4pzYLmGeAgmWpVHY0uxjVuM",
+            authDomain: "inventorysync-88175.firebaseapp.com",
+            projectId: "inventorysync-88175",
+            storageBucket: "inventorysync-88175.firebasestorage.app",
+            messagingSenderId: "22092792874",
+            appId: "1:22092792874:web:2104eca659e445a330ef53",
+            measurementId: "G-R8LPLCS4MR"
+        };
+
+        // INICIALIZAÇÃO DA NUVEM
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // ==========================================
+        // DADOS GLOBAIS E ESTADOS
+        // ==========================================
+        const STATUS_MAP = {
+            'working': { label: 'Operacional', style: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+            'warranty': { label: 'Em Garantia', style: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+            'decommissioned': { label: 'Estado de Baixa', style: 'bg-slate-200 text-slate-700 border-slate-300' },
+            'parts_removed': { label: 'Peças Retiradas', style: 'bg-amber-100 text-amber-700 border-amber-200' },
+            'awaiting_repair': { label: 'Aguardando Reparo', style: 'bg-rose-100 text-rose-700 border-rose-200' }
+        };
+
+        const equipeTecnica = ['Alexandre', 'Brandon', 'Felipe', 'Jaqueline', 'José Luiz', 'José Roberto', 'Samuel'];
+
+        // Escolas fixas para a UI (Num cenário real, isso também viria do banco)
+        const schools = [
+            { id: 1, name: "EE Polo Francisco Morato", cie: "001122", target: 120 },
+            { id: 2, name: "EE Jardim Silvia", cie: "001133", target: 80 },
+            { id: 3, name: "EE Afonso Moreno", cie: "001144", target: 45 },
+            { id: 4, name: "EE Prof. José de Alencar", cie: "001155", target: 150 },
+            { id: 5, name: "EE Bairro Alto", cie: "001166", target: 60 }
+        ];
+
+        let assets = []; // Agora preenchido via Nuvem!
+        let currentTech = equipeTecnica[0];
+        let assetToDelete = null;
+
+        // ==========================================
+        // SINCRONIZAÇÃO EM TEMPO REAL (FIREBASE LISTENER)
+        // ==========================================
+        const ativosRef = collection(db, "ativos");
+        let isFirstLoad = true;
+
+        onSnapshot(ativosRef, (snapshot) => {
+            // Atualiza o array local sempre que algo muda na nuvem
+            assets = snapshot.docs.map(doc => ({
+                id: doc.id, // O ID agora é o Hash gerado pelo Firebase
+                ...doc.data()
+            }));
+
+            // Tira a tela de loading na primeira vez que baixar os dados
+            if(isFirstLoad) {
+                document.getElementById('loadingOverlay').style.opacity = '0';
+                setTimeout(() => document.getElementById('loadingOverlay').style.display = 'none', 300);
+                isFirstLoad = false;
+            }
+
+            // Re-renderiza a tela atual para mostrar os dados fresquinhos
+            const currentView = document.getElementById('viewSelector').value;
+            window.switchView(currentView);
+        });
+
+        // ==========================================
+        // SISTEMA DE NOTIFICAÇÕES (TOAST)
+        // ==========================================
+        window.showToast = function(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            const styles = type === 'success' ? 'bg-white border-l-4 border-emerald-500 text-slate-700'
+                       : (type === 'error' ? 'bg-white border-l-4 border-rose-500 text-slate-700' 
+                       : 'bg-slate-800 text-white');
+            
+            const icon = type === 'success' ? '<i class="bi bi-check-circle-fill text-emerald-500"></i>' 
+                       : (type === 'error' ? '<i class="bi bi-x-circle-fill text-rose-500"></i>' 
+                       : '<i class="bi bi-info-circle-fill text-blue-400"></i>');
+
+            toast.className = `toast-enter flex items-center gap-3 px-6 py-4 rounded-xl shadow-2xl font-bold text-sm min-w-[300px] pointer-events-auto ${styles}`;
+            toast.innerHTML = `${icon} <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ==========================================
+        // CONTROLADOR DE VISÕES
+        // ==========================================
+        window.switchView = function(view) {
+            const main = document.getElementById('mainContent');
+            const sidebar = document.getElementById('sidebarMenu');
+            main.innerHTML = ''; 
+            
+            if (view === 'admin') renderAdmin(main, sidebar);
+            if (view === 'tech') renderTech(main, sidebar);
+            if (view === 'school') renderSchool(main, sidebar);
+        }
+
+        // ==========================================
+        // VISÃO: ADMINISTRADOR (NOC)
+        // ==========================================
+        function renderAdmin(main, sidebar) {
+            sidebar.innerHTML = `
+                <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Menu Global</div>
+                <button class="w-full text-left px-4 py-3 bg-blue-50 text-blue-700 rounded-2xl font-bold shadow-sm border border-blue-100 flex items-center gap-3">
+                    <i class="bi bi-pie-chart-fill text-lg"></i> Dashboard NOC
+                </button>
+            `;
+            
+            const workingTotal = assets.filter(a => a.status === 'working').length;
+            const targetTotal = schools.reduce((acc, s) => acc + s.target, 0);
+            const deficit = targetTotal - workingTotal;
+            const maintTotal = assets.filter(a => ['awaiting_repair', 'warranty'].includes(a.status)).length;
+
+            main.innerHTML = `
+                <div class="max-w-7xl mx-auto animate-fadeIn pb-10">
+                    <div class="mb-8">
+                        <h2 class="text-3xl md:text-4xl font-black text-slate-800 tracking-tight">Centro de Operações</h2>
+                        <p class="text-sm font-bold text-slate-500 mt-1">Sincronizado em tempo real com Firebase Firestore</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 mb-8">
+                        <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                            <p class="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Total Cadastrado</p>
+                            <h3 class="text-4xl font-black text-slate-700">${assets.length}</h3>
+                        </div>
+                        <div class="bg-gradient-to-br from-emerald-400 to-emerald-600 p-6 rounded-3xl shadow-lg shadow-emerald-500/20 text-white">
+                            <p class="text-xs font-black text-emerald-100 uppercase tracking-wider mb-2">Operacionais</p>
+                            <h3 class="text-4xl font-black">${workingTotal}</h3>
+                        </div>
+                        <div class="bg-white p-6 rounded-3xl shadow-sm border border-rose-100">
+                            <p class="text-xs font-black text-rose-500 uppercase tracking-wider mb-2">Déficit Geral</p>
+                            <h3 class="text-4xl font-black text-rose-600">${deficit}</h3>
+                        </div>
+                        <div class="bg-white p-6 rounded-3xl shadow-sm border border-amber-100">
+                            <p class="text-xs font-black text-amber-500 uppercase tracking-wider mb-2">Em Manutenção</p>
+                            <h3 class="text-4xl font-black text-amber-600">${maintTotal}</h3>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div class="p-6 bg-slate-50 border-b border-slate-100">
+                            <h4 class="font-black text-slate-700 uppercase text-xs tracking-widest">Matriz de Criticidade por Escola</h4>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="bg-white text-slate-400 uppercase text-[10px] font-black tracking-wider">
+                                    <tr>
+                                        <th class="p-5 border-b">Unidade Escolar</th>
+                                        <th class="p-5 border-b text-center">Meta</th>
+                                        <th class="p-5 border-b text-center w-1/3">Saúde da Rede</th>
+                                        <th class="p-5 border-b text-center">Déficit</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-50">
+                                    ${schools.map(s => {
+                                        const schoolWorking = assets.filter(a => Number(a.schoolId) === s.id && a.status === 'working').length;
+                                        const schoolDeficit = s.target - schoolWorking;
+                                        const percent = Math.min(Math.round((schoolWorking / s.target) * 100), 100);
+                                        const healthColor = percent >= 80 ? 'bg-emerald-500' : (percent >= 50 ? 'bg-amber-400' : 'bg-rose-500');
+                                        
+                                        return `<tr class="hover:bg-slate-50/80 transition-colors">
+                                            <td class="p-5">
+                                                <div class="font-bold text-slate-700">${s.name}</div>
+                                                <div class="text-[10px] text-slate-400 font-bold uppercase mt-1">CIE: ${s.cie}</div>
+                                            </td>
+                                            <td class="p-5 text-center font-bold text-slate-500">${s.target}</td>
+                                            <td class="p-5">
+                                                <div class="flex items-center gap-4 justify-center">
+                                                    <span class="font-black text-xs w-8 text-right text-slate-600">${percent}%</span>
+                                                    <div class="w-full max-w-[120px] bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                                                        <div class="${healthColor} h-2.5 rounded-full" style="width: ${percent}%"></div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td class="p-5 text-center font-black ${schoolDeficit > (s.target * 0.2) ? 'text-rose-600' : 'text-slate-400'}">${schoolDeficit > 0 ? schoolDeficit : 0}</td>
+                                        </tr>`;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==========================================
+        // VISÃO: TÉCNICO DE CAMPO
+        // ==========================================
+        window.changeTech = function(name) {
+            currentTech = name;
+            window.showToast(`Técnico alterado para ${name}`, 'info');
+        }
+
+        function renderTech(main, sidebar) {
+            sidebar.innerHTML = `
+                <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Sessão Técnica</div>
+                <select id="techName" onchange="window.changeTech(this.value)" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold shadow-inner outline-none focus:border-blue-500 mb-6">
+                    ${equipeTecnica.map(t => `<option value="${t}" ${t === currentTech ? 'selected' : ''}>${t}</option>`).join('')}
+                </select>
+                
+                <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Ferramentas</div>
+                <button onclick="window.switchView('tech')" class="w-full text-left px-4 py-3 bg-blue-50 text-blue-700 rounded-2xl font-bold border border-blue-100 flex items-center gap-3 mb-2 transition-all">
+                    <i class="bi bi-upc-scan text-lg"></i> Validar / Buscar
+                </button>
+                <button onclick="window.renderRegistrationForm()" class="w-full text-left px-4 py-3 text-slate-600 hover:bg-slate-100 hover:text-slate-900 rounded-2xl font-bold flex items-center gap-3 transition-all">
+                    <i class="bi bi-plus-square-dotted text-lg"></i> Inserir Novo
+                </button>
+            `;
+
+            main.innerHTML = `
+                <div class="max-w-4xl mx-auto animate-fadeIn pb-24">
+                    <div class="md:hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex gap-2">
+                         <select id="techNameMobile" onchange="window.changeTech(this.value)" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none">
+                            ${equipeTecnica.map(t => `<option value="${t}" ${t === currentTech ? 'selected' : ''}>Téc: ${t}</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
+                        <div class="flex items-center gap-4 px-4 w-full">
+                            <div class="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100">
+                                <i class="bi bi-geo-alt-fill text-xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Local do Levantamento</p>
+                                <select id="activeSchool" onchange="window.updateTechStats()" class="bg-transparent text-sm md:text-base font-black text-slate-800 outline-none w-full mt-1 cursor-pointer">
+                                    ${schools.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="h-14 w-px bg-slate-100 hidden md:block"></div>
+                        <div class="px-6 py-2 flex flex-row md:flex-col items-center md:items-end justify-between w-full md:w-auto bg-slate-50 md:bg-transparent rounded-2xl md:rounded-none">
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mapeado</p>
+                            <div class="flex items-baseline gap-1 mt-1">
+                                <span id="schoolTotal" class="text-2xl font-black text-blue-600">0</span>
+                                <span id="schoolTarget" class="text-xs font-bold text-slate-400">/0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900 p-8 rounded-[2rem] shadow-xl mb-8 relative overflow-hidden group">
+                        <div class="absolute -right-10 -top-10 opacity-[0.03] transition-transform duration-700 group-hover:scale-110"><i class="bi bi-qr-code-scan text-[15rem] text-white"></i></div>
+                        <h3 class="text-lg font-black text-white mb-6 relative z-10 flex items-center gap-3">
+                            <i class="bi bi-search text-blue-400"></i> Buscar Patrimônio Existente
+                        </h3>
+                        <div class="flex flex-col sm:flex-row gap-3 relative z-10">
+                            <input type="text" id="patSearch" placeholder="Ex: 10001" class="flex-1 p-5 bg-slate-800/50 border border-slate-700 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-white text-xl font-bold placeholder:text-slate-600" onkeypress="if(event.key === 'Enter') window.searchAsset()">
+                            <button onclick="window.searchAsset()" class="bg-blue-600 text-white px-10 py-5 sm:py-0 rounded-2xl hover:bg-blue-500 shadow-lg font-black tracking-widest uppercase">
+                                Buscar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="assetResult" class="hidden animate-fadeIn space-y-6"></div>
+                </div>
+            `;
+            window.updateTechStats();
+        }
+
+        window.updateTechStats = function() {
+            const schoolId = parseInt(document.getElementById('activeSchool').value);
+            const target = schools.find(s => s.id === schoolId).target;
+            const count = assets.filter(a => Number(a.schoolId) === schoolId).length;
+            document.getElementById('schoolTotal').innerText = count;
+            document.getElementById('schoolTarget').innerText = `/${target}`;
+            document.getElementById('assetResult').classList.add('hidden');
+        }
+
+        window.searchAsset = function() {
+            const val = document.getElementById('patSearch').value.trim();
+            const asset = assets.find(a => a.patrimony === val);
+            const res = document.getElementById('assetResult');
+
+            if(!val) return window.showToast('Digite um patrimônio', 'error');
+            if(!asset) return window.showToast('Patrimônio não encontrado na nuvem.', 'error');
+
+            const statusObj = STATUS_MAP[asset.status];
+
+            res.classList.remove('hidden');
+            res.innerHTML = `
+                <div class="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 border-b border-slate-100 pb-8">
+                        <div>
+                            <span class="text-[10px] font-black bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg uppercase tracking-widest">${asset.type}</span>
+                            <h3 class="text-3xl font-black mt-4 tracking-tight text-slate-800">PAT: ${asset.patrimony}</h3>
+                            <p class="text-sm text-slate-400 font-mono font-bold mt-1">S/N: ${asset.serial}</p>
+                        </div>
+                        <div class="text-left md:text-right w-full md:w-auto">
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Status do Sistema</p>
+                            <span class="inline-block px-4 py-2 rounded-xl text-xs font-black border ${statusObj.style}">${statusObj.label}</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div class="space-y-4">
+                            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">1. Checklist de Validação</label>
+                            <div class="space-y-3">
+                                ${['Placa/Fonte (Liga?)', 'Tela/Monitor (OK?)', 'Teclado/Mouse (OK?)'].map(txt => `
+                                    <label class="flex items-center gap-4 p-4 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 has-[:checked]:border-blue-300 has-[:checked]:bg-blue-50/50">
+                                        <input type="checkbox" class="chk-val w-6 h-6 rounded text-blue-600 focus:ring-blue-500 border-slate-300" onchange="window.validateForm()">
+                                        <span class="text-sm font-bold text-slate-700">${txt}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-6 flex flex-col justify-between">
+                            <div>
+                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">2. Novo Status / Diagnóstico</label>
+                                <select id="newStatus" onchange="window.validateForm()" class="w-full p-4 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/20 bg-white text-slate-800 font-black cursor-pointer shadow-sm transition-all">
+                                    <option value="working">OPERACIONAL (Requer Checklist)</option>
+                                    <option value="warranty">GARANTIA</option>
+                                    <option value="awaiting_repair">AGUARDANDO REPARO</option>
+                                    <option value="parts_removed">CANIBALIZADO (Sem Peças)</option>
+                                    <option value="decommissioned">SUCATA / BAIXA</option>
+                                </select>
+                            </div>
+                            
+                            <div class="space-y-3">
+                                <!-- Botão de Salvar via Firebase -->
+                                <button id="saveBtn" onclick="window.saveAssetUpdate('${asset.id}')" disabled class="w-full py-5 bg-slate-100 text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest cursor-not-allowed transition-all flex justify-center gap-2">
+                                    Confirmar Validação
+                                </button>
+                                
+                                <button onclick="window.openDeleteModal('${asset.id}', '${asset.patrimony}')" class="w-full py-4 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-2xl font-black text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2">
+                                    <i class="bi bi-trash3-fill"></i> Excluir do Banco
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            window.validateForm();
+        }
+
+        window.validateForm = function() {
+            const status = document.getElementById('newStatus').value;
+            const checks = document.querySelectorAll('.chk-val:checked').length;
+            const btn = document.getElementById('saveBtn');
+
+            if(status === 'working') {
+                if(checks === 3) {
+                    btn.disabled = false;
+                    btn.className = "w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 transition-all transform active:scale-95 flex justify-center gap-2";
+                } else {
+                    btn.disabled = true;
+                    btn.className = "w-full py-5 bg-slate-100 text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest cursor-not-allowed transition-all flex justify-center gap-2";
+                }
+            } else {
+                btn.disabled = false;
+                btn.className = "w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-blue-600/30 hover:bg-blue-500 transition-all transform active:scale-95 flex justify-center gap-2";
+            }
+        }
+
+        // ESCRITA NO FIREBASE: UPDATE
+        window.saveAssetUpdate = async function(id) {
+            const btn = document.getElementById('saveBtn');
+            btn.innerHTML = '<i class="bi bi-arrow-repeat animate-spin"></i> Salvando...';
+            
+            const status = document.getElementById('newStatus').value;
+            
+            try {
+                const assetRef = doc(db, "ativos", id);
+                await updateDoc(assetRef, {
+                    status: status,
+                    tech: currentTech,
+                    lastUpdate: new Date().toISOString().split('T')[0]
+                });
+                
+                window.showToast('Inventário atualizado na nuvem!', 'success');
+                document.getElementById('assetResult').classList.add('hidden');
+                document.getElementById('patSearch').value = '';
+                // Não precisa chamar updateTechStats manualmente pois o onSnapshot cuidará disso!
+            } catch (error) {
+                console.error("Erro ao atualizar: ", error);
+                window.showToast('Erro de conexão ao salvar.', 'error');
+                btn.innerHTML = 'Confirmar Validação';
+            }
+        }
+
+        // ==========================================
+        // CADASTRO MANUAL NO FIREBASE
+        // ==========================================
+        window.renderRegistrationForm = function() {
+            const main = document.getElementById('mainContent');
+            const schoolId = document.getElementById('activeSchool')?.value || schools[0].id;
+
+            main.innerHTML = `
+                <div class="max-w-3xl mx-auto animate-fadeIn pb-10">
+                    <button onclick="window.switchView('tech')" class="text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest mb-6 inline-flex items-center gap-2 transition-colors">
+                        <i class="bi bi-arrow-left"></i> Voltar
+                    </button>
+                    
+                    <div class="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-sm border border-slate-200">
+                        <div class="flex items-center gap-4 mb-10 border-b border-slate-100 pb-8">
+                            <div class="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 text-2xl">
+                                <i class="bi bi-cloud-arrow-up-fill"></i>
+                            </div>
+                            <div>
+                                <h2 class="text-2xl font-black text-slate-800 tracking-tight">Novo Equipamento na Nuvem</h2>
+                                <p class="text-sm font-bold text-slate-400 mt-1">Cadastro de ativo não listado</p>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-8">
+                            <div>
+                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Escola Base</label>
+                                <select id="regSchool" class="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 font-bold text-slate-700 outline-none focus:border-blue-500">
+                                    ${schools.map(s => `<option value="${s.id}" ${s.id == schoolId ? 'selected' : ''}>${s.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Patrimônio</label>
+                                    <input type="text" id="regPat" placeholder="Ex: 50020" class="w-full p-4 border border-slate-200 rounded-2xl font-bold outline-none focus:border-blue-500 bg-slate-50">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Serial (S/N)</label>
+                                    <input type="text" id="regSerial" placeholder="Fabricante" class="w-full p-4 border border-slate-200 rounded-2xl font-bold outline-none focus:border-blue-500 bg-slate-50">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Tipo do Dispositivo</label>
+                                <div class="grid grid-cols-3 gap-3">
+                                    ${['notebook', 'tablet', 'smartphone'].map(t => `
+                                        <label class="text-center border border-slate-200 rounded-2xl cursor-pointer has-[:checked]:bg-blue-600 has-[:checked]:border-blue-600 has-[:checked]:text-white bg-slate-50 text-slate-500 relative overflow-hidden group">
+                                            <input type="radio" name="regType" value="${t}" class="hidden" ${t === 'notebook' ? 'checked' : ''}>
+                                            <div class="py-5 font-black text-xs uppercase tracking-widest relative z-10">${t}</div>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            
+                            <div class="pt-6">
+                                <button id="submitNewBtn" onclick="window.handleManualRegistration()" class="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all flex justify-center gap-2">
+                                    Adicionar ao Banco de Dados
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ESCRITA NO FIREBASE: ADD
+        window.handleManualRegistration = async function() {
+            const pat = document.getElementById('regPat').value.trim();
+            const serial = document.getElementById('regSerial').value.trim();
+            const type = document.querySelector('input[name="regType"]:checked').value;
+            const schoolId = document.getElementById('regSchool').value;
+            const btn = document.getElementById('submitNewBtn');
+
+            if(!pat || !serial) return window.showToast('Preencha Patrimônio e Série!', 'error');
+            if(assets.some(a => a.patrimony === pat)) return window.showToast('Este patrimônio já existe no banco!', 'error');
+
+            btn.innerHTML = '<i class="bi bi-arrow-repeat animate-spin"></i> Registrando...';
+            btn.disabled = true;
+
+            try {
+                await addDoc(collection(db, "ativos"), {
+                    schoolId: parseInt(schoolId),
+                    type: type,
+                    patrimony: pat,
+                    serial: serial,
+                    status: 'working',
+                    tech: currentTech,
+                    lastUpdate: new Date().toISOString().split('T')[0],
+                    timestamp: serverTimestamp()
+                });
+                
+                window.showToast('Equipamento salvo na nuvem!', 'success');
+                window.switchView('tech');
+            } catch (error) {
+                console.error("Erro ao registrar: ", error);
+                window.showToast('Erro ao criar registro.', 'error');
+                btn.innerHTML = 'Adicionar ao Banco de Dados';
+                btn.disabled = false;
+            }
+        }
+
+        // ==========================================
+        // EXCLUSÃO NO FIREBASE: DELETE
+        // ==========================================
+        window.openDeleteModal = function(id, patrimony) {
+            assetToDelete = id;
+            document.getElementById('deletePatrimonyDisplay').innerText = patrimony;
+            const modal = document.getElementById('deleteModal');
+            const content = document.getElementById('deleteModalContent');
+            const confirmBtn = document.getElementById('confirmDeleteBtn');
+            
+            confirmBtn.innerHTML = 'Sim, Excluir';
+            confirmBtn.disabled = false;
+            
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+            });
+        }
+
+        window.closeDeleteModal = function() {
+            const modal = document.getElementById('deleteModal');
+            const content = document.getElementById('deleteModalContent');
+            
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                assetToDelete = null;
+            }, 300);
+        }
+
+        document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
+            if (assetToDelete) {
+                const btn = document.getElementById('confirmDeleteBtn');
+                btn.innerHTML = '<i class="bi bi-arrow-repeat animate-spin"></i> Excluindo...';
+                btn.disabled = true;
+
+                try {
+                    await deleteDoc(doc(db, "ativos", assetToDelete));
+                    window.closeDeleteModal();
+                    window.showToast('Excluído do Firebase.', 'success');
+                    
+                    document.getElementById('assetResult').classList.add('hidden');
+                    document.getElementById('patSearch').value = '';
+                } catch (error) {
+                    console.error("Erro ao excluir: ", error);
+                    window.showToast('Erro de permissão.', 'error');
+                    window.closeDeleteModal();
+                }
+            }
+        });
+
+        // ==========================================
+        // VISÃO: ESCOLA (DIREÇÃO)
+        // ==========================================
+        function renderSchool(main, sidebar) {
+            const currentSchool = schools[0]; 
+            const schoolAssets = assets.filter(a => Number(a.schoolId) === currentSchool.id);
+
+            sidebar.innerHTML = `
+                <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Transparência</div>
+                <button class="w-full text-left px-4 py-3 bg-blue-50 text-blue-700 rounded-2xl font-bold border border-blue-100 flex items-center gap-3">
+                    <i class="bi bi-card-list text-lg"></i> Inventário Local
+                </button>
+            `;
+            
+            main.innerHTML = `
+                <div class="max-w-5xl mx-auto animate-fadeIn pb-10">
+                    <div class="mb-8">
+                        <span class="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest mb-4">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Sincronizado com NOC
+                        </span>
+                        <h2 class="text-3xl font-black text-slate-800 tracking-tight">${currentSchool.name}</h2>
+                        <p class="text-sm font-bold text-slate-500 mt-1">Lista de auditoria alimentada pela nuvem</p>
+                    </div>
+                    
+                    <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div class="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                            <span class="font-black text-slate-700 uppercase text-xs tracking-widest">Relação de Equipamentos</span>
+                            <span class="text-xs font-bold text-slate-400">${schoolAssets.length} registros no banco</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm whitespace-nowrap">
+                                <thead class="bg-white text-slate-400 uppercase text-[10px] font-black tracking-wider border-b border-slate-100">
+                                    <tr>
+                                        <th class="p-5">Patrimônio / Tipo</th>
+                                        <th class="p-5">Status Atual</th>
+                                        <th class="p-5 text-right">Auditoria Técnica</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-50">
+                                    ${schoolAssets.length > 0 ? schoolAssets.map(a => `
+                                        <tr class="hover:bg-slate-50/50 transition-colors">
+                                            <td class="p-5">
+                                                <div class="font-mono font-bold text-slate-700 text-base">${a.patrimony}</div>
+                                                <div class="text-[10px] font-black text-slate-400 uppercase tracking-wider mt-1">${a.type}</div>
+                                            </td>
+                                            <td class="p-5">
+                                                <span class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border ${STATUS_MAP[a.status].style}">${STATUS_MAP[a.status].label}</span>
+                                            </td>
+                                            <td class="p-5 text-right">
+                                                <div class="font-bold text-slate-600 text-xs flex items-center justify-end gap-2">
+                                                    ${a.tech} <i class="bi bi-person-circle text-slate-300"></i>
+                                                </div>
+                                                <div class="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">${a.lastUpdate}</div>
+                                            </td>
+                                        </tr>
+                                    `).join('') : `
+                                        <tr><td colspan="3" class="p-10 text-center text-slate-400 font-bold text-sm"><i class="bi bi-inbox text-2xl block mb-2 opacity-50"></i> Banco de dados vazio para esta escola.</td></tr>
+                                    `}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
